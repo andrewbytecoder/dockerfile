@@ -1,32 +1,44 @@
+# 构建阶段
+FROM golang:1.25.1-alpine AS builder
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制整个源码（除了 .dockerignore 中排除的）
+COPY . .
+
+# podman build -t nexa:latest -f dockerfiles/httpserver/Dockerfile .
+
+# 编译二进制文件（静态链接，避免依赖 libc）
+# CGO_ENABLED=0 表示禁用 CGO，生成纯静态二进制
+# GOOS=linux 明确指定目标操作系统
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o nexa \
+    ./cmd/nexa/nexa.go
+
+# 最终运行阶段（最小化镜像）
 FROM alpine:latest
 
-# 先更新包列表，并安装 shadow（提供 groupadd, useradd）
-RUN apk add --no-cache shadow
+# 可选：设置非 root 用户（提升安全性）
+RUN adduser -D -s /bin/sh nexauser
 
-# FROM alpine:V0.0.00.006
-### Containers should NOT run as root as a good practice
-RUN groupadd -g 2030 nexagroup && useradd -u 2030 -g nexagroup nexa-user -d /home/nexa-user -m
+# 安装必要依赖（如时区数据）
+RUN apk --no-cache add ca-certificates tzdata
 
-ENV APP_ROOT=/home/nexa-user
-ENV PATH=${APP_ROOT}/bin:${PATH} HOME=${APP_ROOT}
+RUN mkdir -p /home/nexauser
 
-RUN mkdir ${APP_ROOT}/bin
+# 设置工作目录
+WORKDIR /home/nexauser
 
-# 创建必要的目录
-RUN mkdir  ${APP_ROOT}/certs
-RUN mkdir  ${APP_ROOT}/conf
+# 复制编译好的二进制文件
+COPY --chmod=757 --from=builder /app/nexa /home/nexauser/
 
-# 复制程序和证书文件
-# COPY server.key server.crt ${APP_ROOT}/certs/
+# 更改文件所有者
+RUN chown nexauser:nexauser nexa
 
-RUN chmod -R +rx ${APP_ROOT} && \
-    chown -R nexa-user:nexagroup ${APP_ROOT}
+# 切换到非 root 用户
+USER nexauser
 
-COPY --chmod=757  ../../cmd/nexa/nexa ${APP_ROOT}/bin/
-
-RUN chown -R  nexa-user:nexagroup ${APP_ROOT}/conf
-
-USER 2030
-WORKDIR ${APP_ROOT}
-
-ENTRYPOINT ["/home/nexa-user/bin/nexa httpserver"]
+# 启动命令
+CMD ["/home/nexauser/nexa"]
