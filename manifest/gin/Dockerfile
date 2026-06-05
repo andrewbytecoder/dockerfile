@@ -6,6 +6,7 @@ WORKDIR /build
 
 # 复制源代码
 COPY .git .git
+
 COPY . .
 
 # 获取 Git 信息
